@@ -8,6 +8,7 @@
 #include <xmlnode.h>
 #include <account.h>
 #include <prefs.h>
+#include <signal.h>
 
 #include <string.h>
 #include <time.h>
@@ -21,6 +22,8 @@ typedef enum {GTALK, AIM, YAHOO, MSN, QQ, JABBER, ICQ, SKYPE,
 /* function prototypes */
 static AccountType ptype(PurpleAccount *pAccount);
 static AccountType gtype(xmlnode *gIM);
+static void sign_in_cb(PurpleAccount *pAccount, gpointer data);
+static void run(PurpleAccount *pAccount);
 static void purplemerger(xmlnode *glist);
 static void logincb(PurpleUtilFetchUrlData *url_data, gpointer user_data, 
         const gchar *url_text, gsize len, const gchar *error_message);
@@ -38,6 +41,58 @@ static void uploadcb(PurpleUtilFetchUrlData *url_data, gpointer user_data,
         const gchar *url_text, gsize len, const gchar *error_message) {
     return;
 }
+
+static void sign_in_cb(PurpleAccount *pAccount, gpointer data) {
+
+    if (ptype(pAccount) == GTALK) {
+        run(pAccount);
+    }
+
+}
+
+static void run(PurpleAccount *pAccount) {
+gchar **split;
+            gchar *url, *request, *logindata, *username;
+            const char *host = "www.google.com";
+            /* copy relevant part of username before the @ */
+            split = g_strsplit(pAccount->username, "@", 2);
+            username = g_strdup(split[0]);
+            /* login url request */
+            url = g_strdup_printf("https://%s/accounts/ClientLogin", host);
+            logindata = g_strdup_printf(
+                "accountType=GOOGLE&Email=%s%%40gmail.com"
+                "&Passwd=%s&service=cp&source=%s",
+                username, pAccount->password, USER_AGENT);
+            request = g_strdup_printf("POST %s HTTP/1.0\r\n"
+                "Host: %s\r\n"
+                "Content-Length: %d\r\n"
+                "Content-Type: application/x-www-form-urlencoded\r\n\r\n"
+                "%s", url, host, strlen(logindata), logindata);
+            purple_util_fetch_url_request(url, TRUE, USER_AGENT, FALSE,
+                request, TRUE, (PurpleUtilFetchUrlCallback) logincb, 
+                NULL);
+            /* free memory */
+            g_free(url);
+            g_free(request);
+            g_free(logindata);
+            g_free(username);
+            g_strfreev(split);
+            
+            /* by this point, the plugin has synchronized with this 
+             * google talk pAccount
+             * returning TRUE here means that the plugin will perform
+             * this only for the first google talk account found
+             * first, however, we must update the lastrun and changesmade
+             * settings:
+             * the lastrun setting will be the number of seconds since
+             * Jan 1, 1970
+             * the changesmade setting is the number of uploads and
+             * merges performed
+             */
+            purple_prefs_set_int(
+                    "/plugins/core/google-contact/lastrun", time(NULL));
+}
+
 static xmlnode * getedituri(xmlnode *gcontact) {
     xmlnode *link;
     for (link = xmlnode_get_child(gcontact, "link");
@@ -160,6 +215,7 @@ static void getlistcb(PurpleUtilFetchUrlData *url_data, gpointer user_data,
             purple_prefs_get_int(
                 "/plugins/core/google-contact/changesmade")
             + uploadcount);
+    
 }
 
 static xmlnode * findgooglecontact(PurpleBuddy *buddy, xmlnode *glist) {
@@ -301,9 +357,9 @@ static gboolean updateglist(xmlnode *gcontact, PurpleContact *pcontact) {
 static gboolean plugin_load(PurplePlugin *plugin)
 {
     /* declare variables */
-    GList *pAccountList;
     GSList *buddies;
     long int duration;
+    void *accountshandle = purple_accounts_get_handle();
     /* if:
      * no change was made the last time the plugin was run
      * the plugin was run recently
@@ -312,18 +368,20 @@ static gboolean plugin_load(PurplePlugin *plugin)
      *
      * duration is the number of days since the plugin was last run
      */
-    duration = time(NULL)/86400 - //86400 = number of seconds/year
+    duration = time(NULL) -
         purple_prefs_get_int("/plugins/core/google-contact/lastrun");
     if ((purple_prefs_get_int(
-                    "/plugins/core/google-contact/changesmade") == 0) &&
+                "/plugins/core/google-contact/changesmade") == 0) &&
+        /* number of days * 86400 seconds/day = number of days */
         (purple_prefs_get_int(
-                    "/plugins/core/google-contact/period") > duration) &&
+                "/plugins/core/google-contact/period") * 86400 > duration) &&
         purple_prefs_get_bool("/plugins/core/google-contact/success")) {
-        return FALSE;
+        return TRUE;
     }
 
     /* reset the changesmade counter for this run of the plugin */
     purple_prefs_set_int("/plugins/core/google-contact/changesmade", 0);
+    purple_prefs_set_bool("/plugins/core/google-contact/success", TRUE); //TODO set to false when failure detected
     /* add "name" string and "ptype" int to the blist node hash tables
      * this needs to be done so that this information can be read from
      * the blist node
@@ -336,71 +394,12 @@ static gboolean plugin_load(PurplePlugin *plugin)
         purple_blist_node_set_string(node, "name", buddy->name);
         purple_blist_node_set_int(node, "ptype", ptype(buddy->account));
     }
+    g_free(buddies);
+    
+    purple_signal_connect(accountshandle, "account-signed-on", plugin, PURPLE_CALLBACK(sign_in_cb), NULL);
 
     
-    /* iterate through pidgin account list for google account */
-     for (pAccountList = purple_accounts_get_all();
-         pAccountList != NULL;
-         pAccountList = pAccountList->next)  {
-        
-        /* initialize pAccount from pAcccountList data */
-        PurpleAccount *pAccount = (PurpleAccount *)pAccountList->data;
-        
-        /* if the account is a google account */
-        if (ptype(pAccount) == GTALK) {
-            
-            gchar **split;
-            gchar *url, *request, *logindata, *username;
-            const char *host = "www.google.com";
-            /* copy relevant part of username before the @ */
-            split = g_strsplit(pAccount->username, "@", 2);
-            username = g_strdup(split[0]);
-            
-            /* login url request */
-            url = g_strdup_printf("https://%s/accounts/ClientLogin", host);
-            logindata = g_strdup_printf(
-                "accountType=GOOGLE&Email=%s%%40gmail.com"
-                "&Passwd=%s&service=cp&source=%s",
-                username, pAccount->password, USER_AGENT);
-            request = g_strdup_printf("POST %s HTTP/1.0\r\n"
-                "Host: %s\r\n"
-                "Content-Length: %d\r\n"
-                "Content-Type: application/x-www-form-urlencoded\r\n\r\n"
-                "%s", url, host, strlen(logindata), logindata);
-            purple_util_fetch_url_request(url, TRUE, USER_AGENT, FALSE,
-                request, TRUE, (PurpleUtilFetchUrlCallback) logincb, 
-                NULL);
-            /* free memory */
-            g_free(url);
-            g_free(request);
-            g_free(logindata);
-            g_free(buddies);
-            g_free(username);
-            g_strfreev(split);
-            
-            /* by this point, the plugin has synchronized with this 
-             * google talk pAccount
-             * returning TRUE here means that the plugin will perform
-             * this only for the first google talk account found
-             * first, however, we must update the lastrun and changesmade
-             * settings:
-             * the lastrun setting will be the number of days since
-             * Jan 1, 1970 (24 * 60 * 60 = 86400, the number of sec/day)
-             * the changesmade setting is the number of uploads and
-             * merges performed
-             */
-            purple_prefs_set_int(
-                    "/plugins/core/google-contact/lastrun",
-                    time(NULL)/86400);
-            return TRUE;
-        }
-            
-    }
-    
-    /* if this point was reached and TRUE was not returned, then
-     * not google talk account was found and the plugin did nothing
-     */
-    return FALSE;
+    return TRUE;
 }
 
 /* determinds the google IM account type */
@@ -443,7 +442,7 @@ static void purplemerger(xmlnode *glist) {
      * this will involve the following steps: 
      *  1) iterate through google contacts
             a) for first gIM in gcontact, find equiv pcontact
-     *      a) iterate through subsequent gIM in gcontact
+     *      b) iterate through subsequent gIM in gcontact
      *          i) find equivalent pIM for each gIM
      *          ii) if not in same pcontact, merge all of pIM's
      */
@@ -520,8 +519,7 @@ static void purplemerger(xmlnode *glist) {
 
 
 static gboolean plugin_unload(PurplePlugin *plugin) {
-    /* only unload if the plugin was successful */
-    purple_prefs_set_bool("/plugins/core/google-contact/success", TRUE);
+    
     return TRUE;
 }
 
@@ -536,8 +534,8 @@ static PurplePluginInfo info = {
     PURPLE_PRIORITY_DEFAULT,
 
     "core-google-contact",
-    "Goolge Contacts Integration",
-    "1.0",
+    "Google Contacts Integration",
+    "1.03",
 
     "Syncs buddy list with google contacts",          
     "This plugin will synchronize the buddy list with the IM fields in google contacts",          
@@ -564,7 +562,7 @@ static void init_plugin(PurplePlugin *plugin)
     purple_prefs_add_int("/plugins/core/google-contact/changesmade", -1);
     purple_prefs_add_int("/plugins/core/google-contact/lastrun", -1);
     purple_prefs_add_int("/plugins/core/google-contact/period", 5);
-    purple_prefs_add_bool("/plugins/core/google-contact/success", FALSE);
+    purple_prefs_add_bool("/plugins/core/google-contact/success", TRUE);
 }
 
 PURPLE_INIT_PLUGIN(google-contact, init_plugin, info)
