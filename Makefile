@@ -4,7 +4,7 @@ LIBPURPLE_CFLAGS = -I/usr/include/libpurple -I/usr/local/include/libpurple
 GLIB_CFLAGS = -I/usr/include/glib-2.0 -I/usr/lib/glib-2.0/include -I/usr/include -I/usr/local/include/glib-2.0 -I/usr/local/lib/glib-2.0/include -I/usr/local/include 
 
 
-all:   google-contact.so install
+all:   google-contact.so 
 
 install: google-contact.so
 	cp google-contact.so ~/.purple/plugins/
