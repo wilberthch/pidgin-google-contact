@@ -36,6 +36,7 @@ static void upload(xmlnode *gcontact, char *auth, int len);
 static void uploadcb(PurpleUtilFetchUrlData *url_data, gpointer user_data,
         const gchar *url_text, gsize len, const gchar *error_message);
 static xmlnode * getedituri(xmlnode *gcontact);
+static PurplePluginPrefFrame * get_pref_frame(PurplePlugin *plugin);
 
 /* function definitions */
 static void uploadcb(PurpleUtilFetchUrlData *url_data, gpointer user_data,
@@ -468,7 +469,7 @@ static void purplemerger(xmlnode *glist) {
     /* iterate through google contacts */
     for (gContact = xmlnode_get_child(glist, "entry");
          gContact != NULL;
-         gContact = xmlnode_get_next_twin(gContact))    {
+         gContact = xmlnode_get_next_twin(gContact)) {
         xmlnode *gIM;
         PurpleBuddy *buddy;
         PurpleContact *contact;
@@ -489,7 +490,8 @@ static void purplemerger(xmlnode *glist) {
                  pAccountList = pAccountList->next)  {
                 
                 /* initialize pAccount from pAcccountList data */
-                PurpleAccount *pAccount = (PurpleAccount *)pAccountList->data;
+                PurpleAccount *pAccount = 
+                    (PurpleAccount *)pAccountList->data;
                 /* check if the account types are the same */
                 if (ptype(pAccount) == gtype(gIM)) {
                     /* find pIM with the same name as gIM */
@@ -511,11 +513,13 @@ static void purplemerger(xmlnode *glist) {
                         }
                         /* if this is not the first contact */
                         else {
-                            contact = (PurpleContact *) purple_buddy_get_contact(buddy);
+                            contact = (PurpleContact *)
+                                purple_buddy_get_contact(buddy);
                             
                             /*  if the contacts are different, merge */
                             if (contact != pMainContact) {
-                                purple_blist_merge_contact(contact, pMergeNode);
+                                purple_blist_merge_contact(contact,
+                                        pMergeNode);
                                 /* update the merge counter  */
                                 mergecount ++;
                             }
@@ -531,6 +535,10 @@ static void purplemerger(xmlnode *glist) {
             + mergecount);
 }
 
+static PurplePluginUiInfo prefs_info = {
+    get_pref_frame, 0, NULL, NULL, NULL, NULL, NULL
+};
+
 static PurplePluginInfo info = {
     PURPLE_PLUGIN_MAGIC,
     PURPLE_MAJOR_VERSION,
@@ -543,7 +551,7 @@ static PurplePluginInfo info = {
 
     "core-google-contact",
     "Google Contacts Integration",
-    "1.04",
+    "1.05",
 
     "Syncs buddy list with google contacts",          
     "This plugin will synchronize the buddy list with the IM fields in google contacts",          
@@ -556,13 +564,24 @@ static PurplePluginInfo info = {
                                    
     NULL,                          
     NULL,                          
+    &prefs_info,                   
     NULL,                        
-    NULL,                   
     NULL,                          
     NULL,                          
     NULL,                          
     NULL                           
-};                               
+};
+
+static PurplePluginPrefFrame * get_pref_frame(PurplePlugin *plugin) {
+    PurplePluginPrefFrame *frame = purple_plugin_pref_frame_new();
+    PurplePluginPref *pref;
+    pref = purple_plugin_pref_new_with_name_and_label(
+            "/plugins/core/google-contact/period",
+            "Number of days between plugin runs:");
+    purple_plugin_pref_set_bounds(pref, 0, 365);
+    purple_plugin_pref_frame_add(frame, pref);
+    return frame;
+}
     
 static void init_plugin(PurplePlugin *plugin)
 {
