@@ -262,7 +262,13 @@ static xmlnode * findgooglecontact(PurpleBuddy *buddy, xmlnode *glist) {
         email = (char *)malloc(strlen(name) + 12);
         strcpy(email, name);
         if (strchr(email, '@') == NULL) {
-            if (type == AIM) strcat(email, "@aol.com");
+            /* TODO
+             * AIM username has spaces, which should be removed
+             * before doing the search by email
+             * Figure out what should happen for other protocols
+             */
+            if (type == AIM) strcat(email, "@aim.com");
+            else if (type == YAHOO) strcat(email, "@yahoo.com");
         }
 
         for (gemail = xmlnode_get_child(gcontact, "email");
@@ -551,7 +557,7 @@ static PurplePluginInfo info = {
 
     "core-google-contact",
     "Google Contacts Integration",
-    "1.05",
+    "1.06",
 
     "Syncs buddy list with google contacts",          
     "This plugin will synchronize the buddy list with the IM fields in google contacts",          
