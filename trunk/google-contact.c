@@ -1,5 +1,14 @@
 #define PURPLE_PLUGINS
 
+#define PLUGIN_ID "core-google-contact"
+#define PLUGIN_NAME "Google Contacts Integration"
+#define PLUGIN_VERSION "1.07"
+#define PLUGIN_SUMMARY "Syncs buddy list with google contacts"
+#define PLUGIN_DESCRIPTION "This plugin will synchronize the buddy list "\
+    "with the IM fields in google contacts."
+#define PLUGIN_DEVELOPER "noobster721@gmail.com"
+#define PLUGIN_URL "http://code.google.com/p/pidgin-google-contact/"
+
 #include <plugin.h>
 #include <version.h>
 
@@ -234,16 +243,43 @@ static void getlistcb(PurpleUtilFetchUrlData *url_data, gpointer user_data,
 }
 
 static xmlnode * findgooglecontact(PurpleBuddy *buddy, xmlnode *glist) {
-    char *name = buddy->name;
+    AccountType type = ptype(buddy->account);
     xmlnode *gcontact;
+    char *name = g_utf8_casefold(buddy->name, -1);
+    char *tmp;
+    /* convert the name to an email
+     * for some protocols, a domain needs to be added to the username
+     * to convert it to an email, hence the extra space in malloc
+     */
+    char *email = (char *)malloc(strlen(name) + 12);
+    /* copy all nonwhitespace characters */
+    if (strchr(name, ' ') == NULL) strcpy(email, name);
+    else {
+        int i;
+        int j = 0;
+        for (i = 0; i < strlen(name); i++) {
+            if (name[i] != ' ') {
+                email[j] = name[i];
+                j++;
+            }
+        }
+        email[j] = '\0';
+    }
+    if (strchr(email, '@') == NULL) {
+        /* TODO - figure out for other protocols */
+        if (type == AIM) strcat(email, "@aim.com");
+        else if (type == YAHOO) strcat(email, "@yahoo.com");
+    }
+    /* convert to a form independent of case */
+    tmp = g_utf8_casefold(email, -1);
+    free(email); /* prevent a memory leak */
+    email = tmp;
     /* iterate through all gcontacts */
     for (gcontact = xmlnode_get_child(glist, "entry");
          gcontact != NULL;
          gcontact = xmlnode_get_next_twin(gcontact)) {
         xmlnode *gIM;
         xmlnode *gemail;
-        AccountType type = ptype(buddy->account);
-        char *email;
         /* iterate through gIM (IM address) in gcontact to find match */
         for (gIM = xmlnode_get_child(gcontact, "im");
              gIM != NULL;
@@ -251,31 +287,19 @@ static xmlnode * findgooglecontact(PurpleBuddy *buddy, xmlnode *glist) {
             /* if they match, return gcontact */
             if ((strcmp(xmlnode_get_attrib(gIM, "address"), name) == 0)
                 && (gtype(gIM) == type)) {
+                free(email); free(name);
                 return gcontact;
             }
         }
 
         /* iterate through emails to find match */
-        /* for some protocols, a domain needs to be added to the username
-         * to convert it to an email, hence the extra space in malloc
-         */
-        email = (char *)malloc(strlen(name) + 12);
-        strcpy(email, name);
-        if (strchr(email, '@') == NULL) {
-            /* TODO
-             * AIM username has spaces, which should be removed
-             * before doing the search by email
-             * Figure out what should happen for other protocols
-             */
-            if (type == AIM) strcat(email, "@aim.com");
-            else if (type == YAHOO) strcat(email, "@yahoo.com");
-        }
-
         for (gemail = xmlnode_get_child(gcontact, "email");
                 gemail != NULL;
                 gemail = xmlnode_get_next_twin(gemail)) {
-            if (!strcmp(xmlnode_get_attrib(gemail, "address"), email)) {
-                free(email);
+            gchar *gemail_str = g_utf8_casefold( 
+                    xmlnode_get_attrib(gemail, "address"), -1);
+            if (!strcmp(gemail_str, email)) {
+                free(email); free(name); free(gemail_str);
                 return gcontact;
             }
             /* the google contacts service complains if a contact with
@@ -284,12 +308,12 @@ static xmlnode * findgooglecontact(PurpleBuddy *buddy, xmlnode *glist) {
             if (strcmp(xmlnode_get_attrib(gemail, "address"), "") == 0) {
                 xmlnode_free(gemail);
             }
-
+            free(gemail_str);
         }
-        free(email);
     }
     
     /* no result was found */
+    free(email); free(name);
     return NULL;
 }
 
@@ -417,7 +441,8 @@ static gboolean plugin_load(PurplePlugin *plugin)
     }
     g_free(buddies);
     
-    purple_signal_connect(accountshandle, "account-signed-on", plugin, PURPLE_CALLBACK(sign_in_cb), NULL);
+    purple_signal_connect(accountshandle, "account-signed-on", plugin,
+            PURPLE_CALLBACK(sign_in_cb), NULL);
 
     
     return TRUE;
@@ -541,41 +566,30 @@ static void purplemerger(xmlnode *glist) {
             + mergecount);
 }
 
+static gboolean plugin_unload(PurplePlugin *plugin) {
+    void *accountshandle = purple_accounts_get_handle();
+    purple_signal_disconnect(accountshandle, "account-signed-on", plugin,
+            NULL);
+    return TRUE;
+}
+
 static PurplePluginUiInfo prefs_info = {
     get_pref_frame, 0, NULL, NULL, NULL, NULL, NULL
 };
 
 static PurplePluginInfo info = {
-    PURPLE_PLUGIN_MAGIC,
-    PURPLE_MAJOR_VERSION,
-    PURPLE_MINOR_VERSION,
-    PURPLE_PLUGIN_STANDARD,
-    NULL,
-    0,
-    NULL,
-    PURPLE_PRIORITY_DEFAULT,
+    PURPLE_PLUGIN_MAGIC,PURPLE_MAJOR_VERSION, PURPLE_MINOR_VERSION,
+    PURPLE_PLUGIN_STANDARD, NULL,  0, NULL,
+    PURPLE_PRIORITY_LOWEST,
 
-    "core-google-contact",
-    "Google Contacts Integration",
-    "1.06",
-
-    "Syncs buddy list with google contacts",          
-    "This plugin will synchronize the buddy list with the IM fields in google contacts",          
-    "noobster721@gmail.com",                          
-    "http://code.google.com/p/pidgin-google-contact/",     
+    PLUGIN_ID, PLUGIN_NAME, PLUGIN_VERSION, PLUGIN_SUMMARY, 
+    PLUGIN_DESCRIPTION, PLUGIN_DEVELOPER, PLUGIN_URL,
     
-    plugin_load,
-    NULL,
-    NULL,                          
+    plugin_load, plugin_unload, NULL,                          
                                    
-    NULL,                          
-    NULL,                          
+    NULL, NULL,                          
     &prefs_info,                   
-    NULL,                        
-    NULL,                          
-    NULL,                          
-    NULL,                          
-    NULL                           
+    NULL, NULL, NULL, NULL, NULL
 };
 
 static PurplePluginPrefFrame * get_pref_frame(PurplePlugin *plugin) {
